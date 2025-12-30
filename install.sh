@@ -1,24 +1,20 @@
 #!/bin/bash
-# install.sh - Version SIMPLE et GARANTIE
-
+# install.sh - Version FINALE et FONCTIONNELLE
 set -e
 
 echo "========================================"
 echo "🚀 INSTALLATION AVOGREEN ZEBRA CONNECTOR"
 echo "========================================"
 
-# Vérifier root
+# Root check
 if [[ $EUID -ne 0 ]]; then
-    echo "❌ Exécutez avec: sudo bash install.sh"
+    echo "❌ sudo bash install.sh"
     exit 1
 fi
 
-# Demander config
+# Ask for config
 echo ""
-echo "Configuration :"
-echo "---------------"
-
-read -p "IP imprimante Zebra [192.168.1.22]: " ip
+read -p "IP imprimante [192.168.1.22]: " ip
 ip=${ip:-192.168.1.22}
 
 read -p "Port imprimante [9100]: " port
@@ -27,14 +23,14 @@ port=${port:-9100}
 read -p "Port proxy [9090]: " proxy
 proxy=${proxy:-9090}
 
-# Créer répertoire
+# Create directory
 mkdir -p /opt/avogreen-printer
 cd /opt/avogreen-printer
 
-# Écrire le fichier Python CORRECTEMENT
+# Create Python file
 cat > printer_connector.py << PYEOF
 #!/usr/bin/env python3
-import socket, json, logging, time
+import socket, json, logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 ZEBRA_IP = "$ip"
@@ -44,25 +40,24 @@ PROXY_PORT = $proxy
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class PrinterHandler(BaseHTTPRequestHandler):
+class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             length = int(self.headers['Content-Length'])
             data = self.rfile.read(length)
             logger.info(f"Reçu {len(data)} octets")
             
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(10)
-                sock.connect((ZEBRA_IP, ZEBRA_PORT))
-                sock.sendall(data)
+            with socket.socket() as s:
+                s.settimeout(5)
+                s.connect((ZEBRA_IP, ZEBRA_PORT))
+                s.sendall(data)
             
-            logger.info(f"Envoyé à {ZEBRA_IP}:{ZEBRA_PORT}")
             self.send_response(200)
             response = {"status": "success"}
         except Exception as e:
             logger.error(f"Erreur: {e}")
             self.send_response(500)
-            response = {"status": "error", "reason": str(e)}
+            response = {"status": "error"}
         
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
@@ -74,82 +69,63 @@ class PrinterHandler(BaseHTTPRequestHandler):
         self.end_headers()
         
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(3)
+            with socket.socket() as s:
+                s.settimeout(2)
                 s.connect((ZEBRA_IP, ZEBRA_PORT))
                 connected = True
         except:
             connected = False
         
-        status = {
-            "service": "avogreen-printer-connector",
-            "status": "running",
-            "printer_connected": connected,
+        self.wfile.write(json.dumps({
+            "service": "avogreen-printer",
             "printer_ip": ZEBRA_IP,
-            "printer_port": ZEBRA_PORT,
-            "proxy_port": PROXY_PORT
-        }
-        self.wfile.write(json.dumps(status, indent=2).encode())
+            "connected": connected,
+            "port": PROXY_PORT
+        }).encode())
+    
+    def log_message(self, format, *args):
+        logger.info(format % args)
 
-if __name__ == '__main__':
-    print(f"Avogreen Printer Connector")
-    print(f"Imprimante: {ZEBRA_IP}:{ZEBRA_PORT}")
-    print(f"Proxy: 0.0.0.0:{PROXY_PORT}")
-    HTTPServer(('0.0.0.0', PROXY_PORT), PrinterHandler).serve_forever()
+print(f"Connecteur démarré sur {PROXY_PORT}")
+HTTPServer(('0.0.0.0', PROXY_PORT), Handler).serve_forever()
 PYEOF
 
 chmod +x printer_connector.py
 
-# Service systemd
+# Create service
 cat > /etc/systemd/system/avogreen-printer.service << EOF
 [Unit]
-Description=Avogreen Zebra Printer Connector
+Description=Avogreen Printer Connector
 After=network.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/opt/avogreen-printer
 ExecStart=/usr/bin/python3 /opt/avogreen-printer/printer_connector.py
 Restart=always
-RestartSec=10
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Démarrer
+# Start
 systemctl daemon-reload
 systemctl enable avogreen-printer
 systemctl start avogreen-printer
 
-# Attendre
-sleep 3
+sleep 2
 
-# Afficher résultats
-public_ip=$(curl -s icanhazip.com || echo "VOTRE-IP")
-
+# Show info
 echo ""
-echo "========================================"
 echo "✅ INSTALLATION RÉUSSIE"
-echo "========================================"
-echo "📡 URL À FOURNIR À AVOGREEN :"
-echo "   http://${public_ip}:${proxy}"
-echo ""
-echo "🔍 TEST :"
-echo "   curl http://localhost:${proxy}"
-echo ""
-echo "⚙️  CONFIGURATION :"
-echo "   Imprimante: ${ip}:${port}"
-echo "========================================"
+echo "========================"
+echo "URL: http://\$(curl -s icanhazip.com):$proxy"
+echo "Test: curl http://localhost:$proxy"
+echo "Imprimante: $ip:$port"
+echo "========================"
 
-# Tester
 if systemctl is-active --quiet avogreen-printer; then
-    echo "🎉 Service actif et fonctionnel !"
-    echo "Avo"
-    curl -s http://localhost:${proxy} | head -c 200
-    echo ""
+    echo "Service actif ✓"
 else
-    echo "⚠️ Service inactif Avo"
-    journalctl -u avogreen-printer -n 10 --no-pager
+    echo "Service inactif ✗"
 fi
