@@ -1,5 +1,6 @@
 #!/bin/bash
-# install.sh - Version FINALE et FONCTIONNELLE
+# install.sh - Version FINALE FONCTIONNELLE
+
 set -e
 
 echo "========================================"
@@ -8,7 +9,7 @@ echo "========================================"
 
 # Root check
 if [[ $EUID -ne 0 ]]; then
-    echo "❌ sudo bash install.sh"
+    echo "❌ Exécutez avec: sudo bash install.sh"
     exit 1
 fi
 
@@ -28,7 +29,7 @@ mkdir -p /opt/avogreen-printer
 cd /opt/avogreen-printer
 
 # Create Python file
-cat > printer_connector.py << PYEOF
+cat > printer_connector.py << EOF
 #!/usr/bin/env python3
 import socket, json, logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -88,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
 
 print(f"Connecteur démarré sur {PROXY_PORT}")
 HTTPServer(('0.0.0.0', PROXY_PORT), Handler).serve_forever()
-PYEOF
+EOF
 
 chmod +x printer_connector.py
 
@@ -115,17 +116,24 @@ systemctl start avogreen-printer
 
 sleep 2
 
+# Get public IP
+public_ip=$(curl -s icanhazip.com || echo "VOTRE-IP")
+
 # Show info
 echo ""
 echo "✅ INSTALLATION RÉUSSIE"
 echo "========================"
-echo "URL: http://\$(curl -s icanhazip.com):$proxy"
-echo "Test: curl http://localhost:$proxy"
-echo "Imprimante: $ip:$port"
+echo "URL: http://${public_ip}:${proxy}"
+echo "Test: curl http://localhost:${proxy}"
+echo "Imprimante: ${ip}:${port}"
 echo "========================"
 
+# Test
 if systemctl is-active --quiet avogreen-printer; then
     echo "Service actif ✓"
+    echo "Test API:"
+    curl -s http://localhost:${proxy} | head -c 100
+    echo ""
 else
     echo "Service inactif ✗"
 fi
