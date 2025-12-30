@@ -1,27 +1,44 @@
+#!/usr/bin/env python3
+"""
+Connecteur Avogreen - Version Windows
+"""
+
 import socket
 import json
 import logging
-from http.server import HTTPServer, BaseHTTPRequestHandler
 import time
 import os
+import sys
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# Configuration
-CONFIG_FILE = "/etc/avogreen/printer_config.json"
+# Chemin de configuration Windows
+if hasattr(sys, '_MEIPASS'):  # PyInstaller
+    CONFIG_FILE = os.path.join(sys._MEIPASS, "config.json")
+else:
+    CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 
 # Charger configuration
-with open(CONFIG_FILE, 'r') as f:
-    config = json.load(f)
+try:
+    with open(CONFIG_FILE, 'r') as f:
+        config = json.load(f)
+    
+    PRINTER_IP = config['printer_ip']
+    PRINTER_PORT = config['printer_port']
+    AUTH_TOKEN = config['auth_token']
+    CONNECTOR_PORT = config.get('connector_port', 9090)
+    
+except Exception as e:
+    print(f"ERREUR Configuration: {e}")
+    print(f"Fichier: {CONFIG_FILE}")
+    sys.exit(1)
 
-PRINTER_IP = config['printer_ip']
-PRINTER_PORT = config['printer_port']
-AUTH_TOKEN = config['auth_token']
-
-# Logging
+# Logging Windows
+LOG_FILE = os.path.join(os.path.dirname(__file__), "avogreen-printer.log")
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/var/log/avogreen-printer/connector.log'),
+        logging.FileHandler(LOG_FILE),
         logging.StreamHandler()
     ]
 )
@@ -30,20 +47,17 @@ logger = logging.getLogger(__name__)
 class PrinterHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         """Reçoit les commandes d'impression depuis Avogreen"""
-        # Vérifier l'authentification
         auth_header = self.headers.get('Authorization')
         if not auth_header or auth_header != f"Bearer {AUTH_TOKEN}":
             self.send_response(401)
             self.end_headers()
             return
         
-        # Lire les données ZPL
         content_length = int(self.headers['Content-Length'])
         zpl_data = self.rfile.read(content_length)
         
         logger.info(f"Commande reçue - {len(zpl_data)} bytes")
         
-        # Envoyer à l'imprimante
         success = self.send_to_printer(zpl_data)
         
         if success:
@@ -57,18 +71,17 @@ class PrinterHandler(BaseHTTPRequestHandler):
             self.end_headers()
     
     def do_GET(self):
-        """Endpoints de santé et informations"""
+        """Endpoints de santé"""
         if self.path == '/health':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             
-            # Tester la connexion à l'imprimante
             printer_ok = self.test_printer()
-            
             status = {
                 "status": "healthy" if printer_ok else "warning",
                 "service": "avogreen-printer-connector",
+                "os": "windows",
                 "printer_connected": printer_ok,
                 "timestamp": time.time()
             }
@@ -78,7 +91,7 @@ class PrinterHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'text/html')
             self.end_headers()
-            self.wfile.write(b"<h1>Avogreen Printer Connector</h1><p>Service actif</p>")
+            self.wfile.write(b"<h1>Avogreen Printer Connector Windows</h1><p>Service actif</p>")
         
         else:
             self.send_response(404)
@@ -112,10 +125,9 @@ class PrinterHandler(BaseHTTPRequestHandler):
 
 def run_server():
     """Démarre le serveur"""
-    port = config.get('connector_port', 9090)
-    server = HTTPServer(('0.0.0.0', port), PrinterHandler)
+    server = HTTPServer(('0.0.0.0', CONNECTOR_PORT), PrinterHandler)
     
-    logger.info(f"Connecteur démarré sur le port {port}")
+    logger.info(f"Connecteur Windows démarré sur le port {CONNECTOR_PORT}")
     logger.info(f"Imprimante cible: {PRINTER_IP}:{PRINTER_PORT}")
     
     try:
@@ -125,7 +137,12 @@ def run_server():
         server.server_close()
 
 if __name__ == '__main__':
-    print("Avogreen Printer Connector")
+    print("=" * 50)
+    print("AVOGREEN PRINTER CONNECTOR - WINDOWS")
+    print("=" * 50)
     print(f"Imprimante: {PRINTER_IP}:{PRINTER_PORT}")
-    print(f"Port: {config.get('connector_port', 9090)}")
+    print(f"Port API: {CONNECTOR_PORT}")
+    print(f"Logs: {LOG_FILE}")
+    print("=" * 50)
+    
     run_server()
