@@ -1,6 +1,4 @@
-#!/bin/bash
-# install.sh - Connecteur Avogreen pour imprimantes Zebra
-# Version complète et testée
+
 
 set -e
 
