@@ -146,7 +146,7 @@ echo "========================================"
 # Tester
 if systemctl is-active --quiet avogreen-printer; then
     echo "🎉 Service actif et fonctionnel !"
-    echo "Test API..."
+    echo "Avo"
     curl -s http://localhost:${proxy} | head -c 200
     echo ""
 else
