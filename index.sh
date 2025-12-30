@@ -1,5 +1,3 @@
-#!/bin/bash
-# install.sh - Version FINALE et FONCTIONNELLE
 
 set -e
 
