@@ -1,3 +1,5 @@
+#!/bin/sh
+# install.sh - Version robuste avec échappement sed
 
 set -e
 
@@ -6,25 +8,27 @@ echo "🚀 INSTALLATION AVOGREEN ZEBRA CONNECTOR"
 echo "========================================"
 
 # Vérifier root
-if [ "$EUID" -ne 0 ]; then
-    echo "❌ ERREUR : Exécutez avec : sudo bash install.sh"
+if [ "$(id -u)" -ne 0 ]; then
+    echo "❌ ERREUR : sudo sh install.sh"
     exit 1
 fi
 
 # Configuration
 INSTALL_DIR="/opt/avogreen-printer"
 SERVICE_NAME="avogreen-printer"
-SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 # 1. Python
 echo "[1/6] Vérification de Python..."
-if ! command -v python3 &>/dev/null; then
+command -v python3 >/dev/null 2>&1 || {
     echo "📦 Installation de Python3..."
-    apt-get update && apt-get install -y python3 || \
-    yum install -y python3 || \
-    dnf install -y python3 || \
-    zypper install -y python3
-fi
+    apt-get update && apt-get install -y python3 2>/dev/null || \
+    yum install -y python3 2>/dev/null || \
+    dnf install -y python3 2>/dev/null || \
+    zypper install -y python3 2>/dev/null || {
+        echo "❌ Impossible d'installer Python3"
+        exit 1
+    }
+}
 
 # 2. Répertoire
 echo "[2/6] Création du répertoire..."
@@ -35,18 +39,20 @@ cd "$INSTALL_DIR"
 echo "[3/6] Configuration de l'imprimante..."
 echo ""
 
-read -p "Adresse IP de l'imprimante Zebra [192.168.1.22]: " ZEBRA_IP
+# Lire avec valeurs par défaut claires
+printf "Adresse IP de l'imprimante Zebra [192.168.1.22]: "
+read ZEBRA_IP
 ZEBRA_IP=${ZEBRA_IP:-192.168.1.22}
 
-read -p "Port de l'imprimante [9100]: " ZEBRA_PORT
+printf "Port de l'imprimante [9100]: "
+read ZEBRA_PORT
 ZEBRA_PORT=${ZEBRA_PORT:-9100}
-if ! [[ "$ZEBRA_PORT" =~ ^[0-9]+$ ]]; then ZEBRA_PORT=9100; fi
 
-read -p "Port du proxy [9090]: " PROXY_PORT
+printf "Port du proxy [9090]: "
+read PROXY_PORT
 PROXY_PORT=${PROXY_PORT:-9090}
-if ! [[ "$PROXY_PORT" =~ ^[0-9]+$ ]]; then PROXY_PORT=9090; fi
 
-# 4. Script Python
+# 4. Créer le fichier Python DIRECTEMENT avec les bonnes valeurs
 echo "[4/6] Création du connecteur..."
 cat > printer_connector.py << EOF
 #!/usr/bin/env python3
@@ -165,11 +171,10 @@ chmod +x printer_connector.py
 
 # 5. Service systemd
 echo "[5/6] Configuration du service systemd..."
-cat > "$SERVICE_FILE" << EOF
+cat > /etc/systemd/system/"$SERVICE_NAME".service << EOF
 [Unit]
 Description=Avogreen Zebra Printer Connector
 After=network.target
-Wants=network-online.target
 
 [Service]
 Type=simple
@@ -178,68 +183,39 @@ WorkingDirectory=$INSTALL_DIR
 ExecStart=/usr/bin/python3 $INSTALL_DIR/printer_connector.py
 Restart=always
 RestartSec=10
-StandardOutput=journal
-StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# 6. Pare-feu (CORRIGÉ)
-echo "[6/6] Configuration réseau..."
-
-# Validation du port
-if ! [[ "$PROXY_PORT" =~ ^[0-9]+$ ]] || [ "$PROXY_PORT" -lt 1 ] || [ "$PROXY_PORT" -gt 65535 ]; then
-    echo "⚠️  Port $PROXY_PORT invalide, utilisation de 9090"
-    PROXY_PORT=9090
-fi
-
-if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
-    echo "🔧 Configuration UFW (port $PROXY_PORT)..."
-    ufw allow "$PROXY_PORT"/tcp comment "Avogreen Printer Connector"
-    echo "✅ Port $PROXY_PORT ouvert dans UFW"
-elif command -v firewall-cmd >/dev/null 2>&1; then
-    echo "🔧 Configuration firewalld..."
-    firewall-cmd --permanent --add-port="$PROXY_PORT"/tcp
-    firewall-cmd --reload
-    echo "✅ Port $PROXY_PORT ouvert dans firewalld"
-else
-    echo "ℹ️  Pare-feu non détecté ou inactif"
-    echo "💡 Si nécessaire, ouvrez manuellement le port $PROXY_PORT"
-fi
-
-# 7. Démarrer
-echo "🔄 Démarrage du service..."
+# 6. Démarrer
+echo "[6/6] Démarrage du service..."
 systemctl daemon-reload
-systemctl enable "$SERVICE_NAME" --now
+systemctl enable "$SERVICE_NAME"
+systemctl start "$SERVICE_NAME"
 
-# 8. Vérification
+# 7. Vérification
 sleep 2
 echo ""
 echo "========================================"
 echo "✅ INSTALLATION RÉUSSIE"
 echo "========================================"
 
-# IP publique
-IPV4=$(curl -s -4 ifconfig.me 2>/dev/null || echo "VOTRE-IP")
-IPV6=$(curl -s -6 ifconfig.me 2>/dev/null || echo "")
-
-echo "📡 URL À FOURNIR À AVOGREEN :"
-echo "   IPv4: http://$IPV4:$PROXY_PORT"
-[ -n "$IPV6" ] && echo "   IPv6: http://[$IPV6]:$PROXY_PORT"
+# IPs
+IPV4=$(curl -s -4 icanhazip.com 2>/dev/null || echo "VOTRE-IP")
+echo "📡 URL À FOURNIR :"
+echo "   http://$IPV4:$PROXY_PORT"
 echo ""
-echo "🔍 VÉRIFICATION :"
-echo "   sudo systemctl status $SERVICE_NAME"
+echo "🔍 TEST :"
 echo "   curl http://localhost:$PROXY_PORT"
 echo ""
-echo "⚙️  CONFIGURATION :"
+echo "⚙️  CONFIG :"
 echo "   Imprimante: $ZEBRA_IP:$ZEBRA_PORT"
-echo "   Modifier: sudo nano $INSTALL_DIR/printer_connector.py"
 echo "========================================"
 
-# Test final
-if systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo "🎉 Service actif et fonctionnel !"
+if systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1; then
+    echo "🎉 Service actif !"
+    curl -s http://localhost:$PROXY_PORT | python3 -m json.tool 2>/dev/null || echo "Test API..."
 else
-    echo "⚠️  Service inactif - vérifiez: journalctl -u $SERVICE_NAME"
+    echo "❌ Service inactif"
 fi
