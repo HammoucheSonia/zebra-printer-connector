@@ -6,4 +6,4 @@ Connecteur automatique pour impression d'étiquettes de commandes Avogreen sur i
 
 ```bash
 # Installation en une commande
-curl -sSL https://raw.githubusercontent.com/avogreen-tech/zebra-printer-connector/main/install.sh | sudo bash
+curl -sSL https://github.com/HammoucheSonia/zebra-printer-connector/blob/main/install.sh | sudo bash
