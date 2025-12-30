@@ -150,6 +150,6 @@ if systemctl is-active --quiet avogreen-printer; then
     curl -s http://localhost:${proxy} | head -c 200
     echo ""
 else
-    echo "⚠️  Service inactif"
+    echo "⚠️ Service inactif Avo"
     journalctl -u avogreen-printer -n 10 --no-pager
 fi
