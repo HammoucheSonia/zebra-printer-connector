@@ -1,5 +1,3 @@
-#!/bin/sh
-# install.sh - Compatible sh/bash
 
 set -e
 
@@ -8,8 +6,8 @@ echo "🚀 INSTALLATION AVOGREEN ZEBRA CONNECTOR"
 echo "========================================"
 
 # Vérifier root
-if [ "$(id -u)" -ne 0 ]; then
-    echo "❌ ERREUR : Exécutez avec : sudo sh install.sh"
+if [ "$EUID" -ne 0 ]; then
+    echo "❌ ERREUR : Exécutez avec : sudo bash install.sh"
     exit 1
 fi
 
@@ -20,7 +18,7 @@ SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 # 1. Python
 echo "[1/6] Vérification de Python..."
-if ! command -v python3 >/dev/null 2>&1; then
+if ! command -v python3 &>/dev/null; then
     echo "📦 Installation de Python3..."
     apt-get update && apt-get install -y python3 || \
     yum install -y python3 || \
@@ -42,22 +40,15 @@ ZEBRA_IP=${ZEBRA_IP:-192.168.1.22}
 
 read -p "Port de l'imprimante [9100]: " ZEBRA_PORT
 ZEBRA_PORT=${ZEBRA_PORT:-9100}
-# Validation numérique
-if ! echo "$ZEBRA_PORT" | grep -qE '^[0-9]+$'; then
-    echo "⚠️  Port invalide, utilisation de 9100"
-    ZEBRA_PORT=9100
-fi
+if ! [[ "$ZEBRA_PORT" =~ ^[0-9]+$ ]]; then ZEBRA_PORT=9100; fi
 
 read -p "Port du proxy [9090]: " PROXY_PORT
 PROXY_PORT=${PROXY_PORT:-9090}
-if ! echo "$PROXY_PORT" | grep -qE '^[0-9]+$'; then
-    echo "⚠️  Port invalide, utilisation de 9090"
-    PROXY_PORT=9090
-fi
+if ! [[ "$PROXY_PORT" =~ ^[0-9]+$ ]]; then PROXY_PORT=9090; fi
 
-# 4. Script Python (identique)
+# 4. Script Python
 echo "[4/6] Création du connecteur..."
-cat > printer_connector.py << 'EOF'
+cat > printer_connector.py << EOF
 #!/usr/bin/env python3
 """
 Avogreen Printer Connector
@@ -69,9 +60,9 @@ import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Configuration
-ZEBRA_IP = "IP_REPLACE"
-ZEBRA_PORT = PORT_REPLACE
-PROXY_PORT = PROXY_REPLACE
+ZEBRA_IP = "$ZEBRA_IP"
+ZEBRA_PORT = $ZEBRA_PORT
+PROXY_PORT = $PROXY_PORT
 
 # Logging
 logging.basicConfig(
@@ -170,11 +161,6 @@ if __name__ == '__main__':
     run_server()
 EOF
 
-# Remplacer les variables
-sed -i "s/IP_REPLACE/$ZEBRA_IP/g" printer_connector.py
-sed -i "s/PORT_REPLACE/$ZEBRA_PORT/g" printer_connector.py
-sed -i "s/PROXY_REPLACE/$PROXY_PORT/g" printer_connector.py
-
 chmod +x printer_connector.py
 
 # 5. Service systemd
@@ -199,16 +185,16 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-# 6. Pare-feu
+# 6. Pare-feu (CORRIGÉ)
 echo "[6/6] Configuration réseau..."
 
 # Validation du port
-if ! echo "$PROXY_PORT" | grep -qE '^[0-9]+$' || [ "$PROXY_PORT" -lt 1 ] || [ "$PROXY_PORT" -gt 65535 ]; then
+if ! [[ "$PROXY_PORT" =~ ^[0-9]+$ ]] || [ "$PROXY_PORT" -lt 1 ] || [ "$PROXY_PORT" -gt 65535 ]; then
     echo "⚠️  Port $PROXY_PORT invalide, utilisation de 9090"
     PROXY_PORT=9090
 fi
 
-if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "active"; then
+if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
     echo "🔧 Configuration UFW (port $PROXY_PORT)..."
     ufw allow "$PROXY_PORT"/tcp comment "Avogreen Printer Connector"
     echo "✅ Port $PROXY_PORT ouvert dans UFW"
@@ -225,11 +211,10 @@ fi
 # 7. Démarrer
 echo "🔄 Démarrage du service..."
 systemctl daemon-reload
-systemctl enable "$SERVICE_NAME"
-systemctl start "$SERVICE_NAME"
+systemctl enable "$SERVICE_NAME" --now
 
 # 8. Vérification
-sleep 3
+sleep 2
 echo ""
 echo "========================================"
 echo "✅ INSTALLATION RÉUSSIE"
@@ -241,9 +226,7 @@ IPV6=$(curl -s -6 ifconfig.me 2>/dev/null || echo "")
 
 echo "📡 URL À FOURNIR À AVOGREEN :"
 echo "   IPv4: http://$IPV4:$PROXY_PORT"
-if [ -n "$IPV6" ]; then
-    echo "   IPv6: http://[$IPV6]:$PROXY_PORT"
-fi
+[ -n "$IPV6" ] && echo "   IPv6: http://[$IPV6]:$PROXY_PORT"
 echo ""
 echo "🔍 VÉRIFICATION :"
 echo "   sudo systemctl status $SERVICE_NAME"
@@ -255,7 +238,7 @@ echo "   Modifier: sudo nano $INSTALL_DIR/printer_connector.py"
 echo "========================================"
 
 # Test final
-if systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1; then
+if systemctl is-active --quiet "$SERVICE_NAME"; then
     echo "🎉 Service actif et fonctionnel !"
 else
     echo "⚠️  Service inactif - vérifiez: journalctl -u $SERVICE_NAME"
